@@ -1,0 +1,19 @@
+{
+  "name": "week8-express-postgres",
+  "version": "1.0.0",
+  "description": "Week 8 backend homework using Express and PostgreSQL",
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node --watch index.js"
+  },
+  "keywords": [],
+  "author": "Dante",
+  "license": "ISC",
+  "dependencies": {
+    "dotenv": "^18.0.7",
+    "express": "^5.0.0",
+    "pg": "^8.0.0"
+  }
+}
