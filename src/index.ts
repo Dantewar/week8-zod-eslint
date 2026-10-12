@@ -1,69 +1,75 @@
-import express from "express";
-import dotenv from "dotenv";
+import express, { type Request, type Response } from "express";
 import { pool } from "./db.js";
-
-dotenv.config();
+import { env } from "./env.js";
 
 const app = express();
-const PORT = Number(process.env.PORT) || 3000;
+const PORT = env.PORT;
 
 app.use(express.json());
 
-const isValidId = (id: string): boolean =>
-  /^\d+$/.test(id) &&
-  Number.isSafeInteger(Number(id)) &&
-  Number(id) > 0;
+const isValidId = (id: string | string[]): boolean => {
+  if (Array.isArray(id)) {
+    return false;
+  }
+
+  return (
+    /^\d+$/.test(id) &&
+    Number.isSafeInteger(Number(id)) &&
+    Number(id) > 0
+  );
+};
 
 const getErrorMessage = (error: unknown): string => {
-  return error instanceof Error ? error.message : "Unknown error";
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  return "Unknown error";
 };
 
 const getErrorCode = (error: unknown): string | undefined => {
   if (
     typeof error === "object" &&
     error !== null &&
-    "code" in error
+    "code" in error &&
+    typeof error.code === "string"
   ) {
-    const code = (error as { code?: unknown }).code;
-
-    return typeof code === "string" ? code : undefined;
+    return error.code;
   }
 
   return undefined;
 };
 
 // Welcome
-app.get("/", (req, res) => {
+app.get("/", (req: Request, res: Response) => {
   res.status(200).json({
     message: "Welcome to the Library API",
   });
 });
 
 // Get all books with filtering and sorting
-app.get("/books", async (req, res) => {
+app.get("/books", async (req: Request, res: Response) => {
   const { genre, sort } = req.query;
   const allowedSorts = ["title", "published_year", "genre"];
 
   if (genre !== undefined && typeof genre !== "string") {
-    res.status(400).json({
+    return res.status(400).json({
       message: "Invalid genre",
     });
-    return;
   }
 
   if (
     sort !== undefined &&
     (typeof sort !== "string" || !allowedSorts.includes(sort))
   ) {
-    res.status(400).json({
+    return res.status(400).json({
       message: "Invalid sort field",
     });
-    return;
   }
 
   try {
     let query = "SELECT * FROM books";
-    const values = [];
+    const values: string[] = [];
 
     if (genre !== undefined) {
       query += " WHERE genre = $1";
@@ -75,7 +81,7 @@ app.get("/books", async (req, res) => {
     const result = await pool.query(query, values);
 
     res.status(200).json(result.rows);
-  } catch (error: unknown) {
+  } catch (error) {
     console.error(getErrorMessage(error));
 
     res.status(500).json({
@@ -85,12 +91,11 @@ app.get("/books", async (req, res) => {
 });
 
 // Get one book
-app.get("/books/:id", async (req, res) => {
+app.get("/books/:id", async (req: Request, res: Response) => {
   if (!isValidId(req.params.id)) {
-    res.status(400).json({
+    return res.status(400).json({
       message: "Invalid book ID",
     });
-    return;
   }
 
   try {
@@ -100,14 +105,13 @@ app.get("/books/:id", async (req, res) => {
     );
 
     if (result.rows.length === 0) {
-      res.status(404).json({
+      return res.status(404).json({
         message: "Book not found",
       });
-      return;
     }
 
     res.status(200).json(result.rows[0]);
-  } catch (error: unknown) {
+  } catch (error) {
     console.error(getErrorMessage(error));
 
     res.status(500).json({
@@ -117,14 +121,13 @@ app.get("/books/:id", async (req, res) => {
 });
 
 // Create a book
-app.post("/books", async (req, res) => {
+app.post("/books", async (req: Request, res: Response) => {
   const { title, genre, published_year, author_id } = req.body ?? {};
 
   if (typeof title !== "string" || !title.trim()) {
-    res.status(400).json({
+    return res.status(400).json({
       message: "Title is required",
     });
-    return;
   }
 
   if (
@@ -132,10 +135,9 @@ app.post("/books", async (req, res) => {
     genre !== null &&
     typeof genre !== "string"
   ) {
-    res.status(400).json({
+    return res.status(400).json({
       message: "Invalid genre",
     });
-    return;
   }
 
   if (
@@ -143,10 +145,9 @@ app.post("/books", async (req, res) => {
     published_year !== null &&
     !Number.isInteger(published_year)
   ) {
-    res.status(400).json({
+    return res.status(400).json({
       message: "Invalid published year",
     });
-    return;
   }
 
   if (
@@ -154,10 +155,9 @@ app.post("/books", async (req, res) => {
     author_id !== null &&
     (!Number.isSafeInteger(author_id) || author_id <= 0)
   ) {
-    res.status(400).json({
+    return res.status(400).json({
       message: "Invalid author ID",
     });
-    return;
   }
 
   try {
@@ -174,12 +174,11 @@ app.post("/books", async (req, res) => {
     );
 
     res.status(201).json(result.rows[0]);
-  } catch (error: unknown) {
+  } catch (error) {
     if (getErrorCode(error) === "23503") {
-      res.status(400).json({
+      return res.status(400).json({
         message: "Author does not exist",
       });
-      return;
     }
 
     console.error(getErrorMessage(error));
@@ -191,21 +190,19 @@ app.post("/books", async (req, res) => {
 });
 
 // Update a complete book
-app.put("/books/:id", async (req, res) => {
+app.put("/books/:id", async (req: Request, res: Response) => {
   if (!isValidId(req.params.id)) {
-    res.status(400).json({
+    return res.status(400).json({
       message: "Invalid book ID",
     });
-    return;
   }
 
   const { title, genre, published_year } = req.body ?? {};
 
   if (typeof title !== "string" || !title.trim()) {
-    res.status(400).json({
+    return res.status(400).json({
       message: "Title is required",
     });
-    return;
   }
 
   try {
@@ -223,14 +220,13 @@ app.put("/books/:id", async (req, res) => {
     );
 
     if (result.rows.length === 0) {
-      res.status(404).json({
+      return res.status(404).json({
         message: "Book not found",
       });
-      return;
     }
 
     res.status(200).json(result.rows[0]);
-  } catch (error: unknown) {
+  } catch (error) {
     console.error(getErrorMessage(error));
 
     res.status(500).json({
@@ -240,12 +236,11 @@ app.put("/books/:id", async (req, res) => {
 });
 
 // Partially update a book
-app.patch("/books/:id", async (req, res) => {
+app.patch("/books/:id", async (req: Request, res: Response) => {
   if (!isValidId(req.params.id)) {
-    res.status(400).json({
+    return res.status(400).json({
       message: "Invalid book ID",
     });
-    return;
   }
 
   const body = req.body;
@@ -256,10 +251,9 @@ app.patch("/books/:id", async (req, res) => {
     Array.isArray(body) ||
     Object.keys(body).length === 0
   ) {
-    res.status(400).json({
+    return res.status(400).json({
       message: "Request body cannot be empty",
     });
-    return;
   }
 
   const allowedFields = ["title", "genre", "published_year"];
@@ -269,10 +263,9 @@ app.patch("/books/:id", async (req, res) => {
       (field) => !allowedFields.includes(field)
     )
   ) {
-    res.status(400).json({
+    return res.status(400).json({
       message: "Invalid book field",
     });
-    return;
   }
 
   const { title, genre, published_year } = body;
@@ -287,10 +280,9 @@ app.patch("/books/:id", async (req, res) => {
       published_year !== null &&
       !Number.isInteger(published_year))
   ) {
-    res.status(400).json({
+    return res.status(400).json({
       message: "Invalid book data",
     });
-    return;
   }
 
   try {
@@ -311,14 +303,13 @@ app.patch("/books/:id", async (req, res) => {
     );
 
     if (result.rows.length === 0) {
-      res.status(404).json({
+      return res.status(404).json({
         message: "Book not found",
       });
-      return;
     }
 
     res.status(200).json(result.rows[0]);
-  } catch (error: unknown) {
+  } catch (error) {
     console.error(getErrorMessage(error));
 
     res.status(500).json({
@@ -328,12 +319,11 @@ app.patch("/books/:id", async (req, res) => {
 });
 
 // Delete a book
-app.delete("/books/:id", async (req, res) => {
+app.delete("/books/:id", async (req: Request, res: Response) => {
   if (!isValidId(req.params.id)) {
-    res.status(400).json({
+    return res.status(400).json({
       message: "Invalid book ID",
     });
-    return;
   }
 
   try {
@@ -343,22 +333,20 @@ app.delete("/books/:id", async (req, res) => {
     );
 
     if (result.rows.length === 0) {
-      res.status(404).json({
+      return res.status(404).json({
         message: "Book not found",
       });
-      return;
     }
 
     res.status(200).json({
       message: "Book deleted successfully",
       book: result.rows[0],
     });
-  } catch (error: unknown) {
+  } catch (error) {
     if (getErrorCode(error) === "23503") {
-      res.status(409).json({
+      return res.status(409).json({
         message: "Cannot delete a book with loan records",
       });
-      return;
     }
 
     console.error(getErrorMessage(error));
@@ -370,14 +358,14 @@ app.delete("/books/:id", async (req, res) => {
 });
 
 // Get all authors
-app.get("/authors", async (req, res) => {
+app.get("/authors", async (req: Request, res: Response) => {
   try {
     const result = await pool.query(
       "SELECT * FROM authors ORDER BY id"
     );
 
     res.status(200).json(result.rows);
-  } catch (error: unknown) {
+  } catch (error) {
     console.error(getErrorMessage(error));
 
     res.status(500).json({
@@ -387,14 +375,13 @@ app.get("/authors", async (req, res) => {
 });
 
 // Create an author
-app.post("/authors", async (req, res) => {
+app.post("/authors", async (req: Request, res: Response) => {
   const { name } = req.body ?? {};
 
   if (typeof name !== "string" || !name.trim()) {
-    res.status(400).json({
+    return res.status(400).json({
       message: "Author name is required",
     });
-    return;
   }
 
   try {
@@ -404,7 +391,7 @@ app.post("/authors", async (req, res) => {
     );
 
     res.status(201).json(result.rows[0]);
-  } catch (error: unknown) {
+  } catch (error) {
     console.error(getErrorMessage(error));
 
     res.status(500).json({
@@ -414,12 +401,11 @@ app.post("/authors", async (req, res) => {
 });
 
 // Get books by author
-app.get("/authors/:id/books", async (req, res) => {
+app.get("/authors/:id/books", async (req: Request, res: Response) => {
   if (!isValidId(req.params.id)) {
-    res.status(400).json({
+    return res.status(400).json({
       message: "Invalid author ID",
     });
-    return;
   }
 
   const id = Number(req.params.id);
@@ -431,10 +417,9 @@ app.get("/authors/:id/books", async (req, res) => {
     );
 
     if (author.rows.length === 0) {
-      res.status(404).json({
+      return res.status(404).json({
         message: "Author not found",
       });
-      return;
     }
 
     const result = await pool.query(
@@ -453,7 +438,7 @@ app.get("/authors/:id/books", async (req, res) => {
     );
 
     res.status(200).json(result.rows);
-  } catch (error: unknown) {
+  } catch (error) {
     console.error(getErrorMessage(error));
 
     res.status(500).json({
@@ -463,24 +448,22 @@ app.get("/authors/:id/books", async (req, res) => {
 });
 
 // Create a library member
-app.post("/members", async (req, res) => {
+app.post("/members", async (req: Request, res: Response) => {
   const { name, email } = req.body ?? {};
 
   if (typeof name !== "string" || !name.trim()) {
-    res.status(400).json({
+    return res.status(400).json({
       message: "Member name is required",
     });
-    return;
   }
 
   if (
     typeof email !== "string" ||
     !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())
   ) {
-    res.status(400).json({
+    return res.status(400).json({
       message: "Valid email is required",
     });
-    return;
   }
 
   try {
@@ -492,12 +475,11 @@ app.post("/members", async (req, res) => {
     );
 
     res.status(201).json(result.rows[0]);
-  } catch (error: unknown) {
+  } catch (error) {
     if (getErrorCode(error) === "23505") {
-      res.status(409).json({
+      return res.status(409).json({
         message: "Email already exists",
       });
-      return;
     }
 
     console.error(getErrorMessage(error));
@@ -509,7 +491,7 @@ app.post("/members", async (req, res) => {
 });
 
 // Borrow a book
-app.post("/loans", async (req, res) => {
+app.post("/loans", async (req: Request, res: Response) => {
   const { book_id, member_id } = req.body ?? {};
 
   if (
@@ -518,10 +500,9 @@ app.post("/loans", async (req, res) => {
     !Number.isSafeInteger(member_id) ||
     member_id <= 0
   ) {
-    res.status(400).json({
+    return res.status(400).json({
       message: "Valid book_id and member_id are required",
     });
-    return;
   }
 
   try {
@@ -532,10 +513,9 @@ app.post("/loans", async (req, res) => {
     );
 
     if (activeLoan.rows.length > 0) {
-      res.status(409).json({
+      return res.status(409).json({
         message: "Book is already borrowed",
       });
-      return;
     }
 
     const result = await pool.query(
@@ -546,19 +526,17 @@ app.post("/loans", async (req, res) => {
     );
 
     res.status(201).json(result.rows[0]);
-  } catch (error: unknown) {
+  } catch (error) {
     if (getErrorCode(error) === "23505") {
-      res.status(409).json({
+      return res.status(409).json({
         message: "Book is already borrowed",
       });
-      return;
     }
 
     if (getErrorCode(error) === "23503") {
-      res.status(400).json({
+      return res.status(400).json({
         message: "Book or member does not exist",
       });
-      return;
     }
 
     console.error(getErrorMessage(error));
@@ -570,12 +548,11 @@ app.post("/loans", async (req, res) => {
 });
 
 // Return a borrowed book
-app.patch("/loans/:id/return", async (req, res) => {
+app.patch("/loans/:id/return", async (req: Request, res: Response) => {
   if (!isValidId(req.params.id)) {
-    res.status(400).json({
+    return res.status(400).json({
       message: "Invalid loan ID",
     });
-    return;
   }
 
   try {
@@ -588,11 +565,10 @@ app.patch("/loans/:id/return", async (req, res) => {
     );
 
     if (result.rows.length > 0) {
-      res.status(200).json({
+      return res.status(200).json({
         message: "Book returned successfully",
         loan: result.rows[0],
       });
-      return;
     }
 
     const existingLoan = await pool.query(
@@ -601,16 +577,15 @@ app.patch("/loans/:id/return", async (req, res) => {
     );
 
     if (existingLoan.rows.length === 0) {
-      res.status(404).json({
+      return res.status(404).json({
         message: "Loan not found",
       });
-      return;
     }
 
     res.status(409).json({
       message: "Book has already been returned",
     });
-  } catch (error: unknown) {
+  } catch (error) {
     console.error(getErrorMessage(error));
 
     res.status(500).json({
@@ -620,12 +595,11 @@ app.patch("/loans/:id/return", async (req, res) => {
 });
 
 // Get a member's loan history
-app.get("/members/:id/loans", async (req, res) => {
+app.get("/members/:id/loans", async (req: Request, res: Response) => {
   if (!isValidId(req.params.id)) {
-    res.status(400).json({
+    return res.status(400).json({
       message: "Invalid member ID",
     });
-    return;
   }
 
   const id = Number(req.params.id);
@@ -637,10 +611,9 @@ app.get("/members/:id/loans", async (req, res) => {
     );
 
     if (member.rows.length === 0) {
-      res.status(404).json({
+      return res.status(404).json({
         message: "Member not found",
       });
-      return;
     }
 
     const result = await pool.query(
@@ -661,7 +634,7 @@ app.get("/members/:id/loans", async (req, res) => {
     );
 
     res.status(200).json(result.rows);
-  } catch (error: unknown) {
+  } catch (error) {
     console.error(getErrorMessage(error));
 
     res.status(500).json({
