@@ -1,6 +1,8 @@
 import express, { type Request, type Response } from "express";
+import { z } from "zod";
 import { pool } from "./db.js";
 import { env } from "./env.js";
+import { bookSchema, type Book } from "./schemas.js";
 
 const app = express();
 const PORT = env.PORT;
@@ -78,7 +80,7 @@ app.get("/books", async (req: Request, res: Response) => {
 
     query += sort ? ` ORDER BY ${sort}` : " ORDER BY id";
 
-    const result = await pool.query(query, values);
+    const result = await pool.query<Book>(query, values);
 
     res.status(200).json(result.rows);
   } catch (error) {
@@ -99,7 +101,7 @@ app.get("/books/:id", async (req: Request, res: Response) => {
   }
 
   try {
-    const result = await pool.query(
+    const result = await pool.query<Book>(
       "SELECT * FROM books WHERE id = $1",
       [Number(req.params.id)]
     );
@@ -122,51 +124,33 @@ app.get("/books/:id", async (req: Request, res: Response) => {
 
 // Create a book
 app.post("/books", async (req: Request, res: Response) => {
-  const { title, genre, published_year, author_id } = req.body ?? {};
+  const parsedBook = bookSchema.safeParse(req.body);
 
-  if (typeof title !== "string" || !title.trim()) {
+  if (!parsedBook.success) {
     return res.status(400).json({
-      message: "Title is required",
+      errors: z.flattenError(parsedBook.error),
     });
   }
 
-  if (
-    genre !== undefined &&
-    genre !== null &&
-    typeof genre !== "string"
-  ) {
-    return res.status(400).json({
-      message: "Invalid genre",
-    });
-  }
-
-  if (
-    published_year !== undefined &&
-    published_year !== null &&
-    !Number.isInteger(published_year)
-  ) {
-    return res.status(400).json({
-      message: "Invalid published year",
-    });
-  }
-
-  if (
-    author_id !== undefined &&
-    author_id !== null &&
-    (!Number.isSafeInteger(author_id) || author_id <= 0)
-  ) {
-    return res.status(400).json({
-      message: "Invalid author ID",
-    });
-  }
+  const {
+    title,
+    genre,
+    published_year,
+    author_id,
+  } = parsedBook.data;
 
   try {
-    const result = await pool.query(
-      `INSERT INTO books (title, genre, published_year, author_id)
+    const result = await pool.query<Book>(
+      `INSERT INTO books (
+         title,
+         genre,
+         published_year,
+         author_id
+       )
        VALUES ($1, $2, $3, $4)
        RETURNING *`,
       [
-        title.trim(),
+        title,
         genre ?? null,
         published_year ?? null,
         author_id ?? null,
@@ -197,24 +181,36 @@ app.put("/books/:id", async (req: Request, res: Response) => {
     });
   }
 
-  const { title, genre, published_year } = req.body ?? {};
+  const parsedBook = bookSchema.safeParse(req.body);
 
-  if (typeof title !== "string" || !title.trim()) {
+  if (!parsedBook.success) {
     return res.status(400).json({
-      message: "Title is required",
+      errors: z.flattenError(parsedBook.error),
     });
   }
 
+  const {
+    title,
+    genre,
+    published_year,
+    author_id,
+  } = parsedBook.data;
+
   try {
-    const result = await pool.query(
+    const result = await pool.query<Book>(
       `UPDATE books
-       SET title = $1, genre = $2, published_year = $3
-       WHERE id = $4
+       SET
+         title = $1,
+         genre = $2,
+         published_year = $3,
+         author_id = $4
+       WHERE id = $5
        RETURNING *`,
       [
-        title.trim(),
+        title,
         genre ?? null,
         published_year ?? null,
+        author_id ?? null,
         Number(req.params.id),
       ]
     );
@@ -227,6 +223,12 @@ app.put("/books/:id", async (req: Request, res: Response) => {
 
     res.status(200).json(result.rows[0]);
   } catch (error) {
+    if (getErrorCode(error) === "23503") {
+      return res.status(400).json({
+        message: "Author does not exist",
+      });
+    }
+
     console.error(getErrorMessage(error));
 
     res.status(500).json({
@@ -256,7 +258,11 @@ app.patch("/books/:id", async (req: Request, res: Response) => {
     });
   }
 
-  const allowedFields = ["title", "genre", "published_year"];
+  const allowedFields = [
+    "title",
+    "genre",
+    "published_year",
+  ];
 
   if (
     Object.keys(body).some(
@@ -286,7 +292,7 @@ app.patch("/books/:id", async (req: Request, res: Response) => {
   }
 
   try {
-    const result = await pool.query(
+    const result = await pool.query<Book>(
       `UPDATE books
        SET
          title = COALESCE($1, title),
@@ -327,7 +333,7 @@ app.delete("/books/:id", async (req: Request, res: Response) => {
   }
 
   try {
-    const result = await pool.query(
+    const result = await pool.query<Book>(
       "DELETE FROM books WHERE id = $1 RETURNING *",
       [Number(req.params.id)]
     );
@@ -401,51 +407,55 @@ app.post("/authors", async (req: Request, res: Response) => {
 });
 
 // Get books by author
-app.get("/authors/:id/books", async (req: Request, res: Response) => {
-  if (!isValidId(req.params.id)) {
-    return res.status(400).json({
-      message: "Invalid author ID",
-    });
-  }
-
-  const id = Number(req.params.id);
-
-  try {
-    const author = await pool.query(
-      "SELECT id FROM authors WHERE id = $1",
-      [id]
-    );
-
-    if (author.rows.length === 0) {
-      return res.status(404).json({
-        message: "Author not found",
+app.get(
+  "/authors/:id/books",
+  async (req: Request, res: Response) => {
+    if (!isValidId(req.params.id)) {
+      return res.status(400).json({
+        message: "Invalid author ID",
       });
     }
 
-    const result = await pool.query(
-      `SELECT
-         books.id,
-         books.title,
-         books.genre,
-         books.published_year,
-         books.author_id,
-         authors.name AS author_name
-       FROM books
-       JOIN authors ON books.author_id = authors.id
-       WHERE authors.id = $1
-       ORDER BY books.id`,
-      [id]
-    );
+    const id = Number(req.params.id);
 
-    res.status(200).json(result.rows);
-  } catch (error) {
-    console.error(getErrorMessage(error));
+    try {
+      const author = await pool.query(
+        "SELECT id FROM authors WHERE id = $1",
+        [id]
+      );
 
-    res.status(500).json({
-      message: "Failed to fetch author's books",
-    });
+      if (author.rows.length === 0) {
+        return res.status(404).json({
+          message: "Author not found",
+        });
+      }
+
+      const result = await pool.query(
+        `SELECT
+           books.id,
+           books.title,
+           books.genre,
+           books.published_year,
+           books.author_id,
+           authors.name AS author_name
+         FROM books
+         JOIN authors
+           ON books.author_id = authors.id
+         WHERE authors.id = $1
+         ORDER BY books.id`,
+        [id]
+      );
+
+      res.status(200).json(result.rows);
+    } catch (error) {
+      console.error(getErrorMessage(error));
+
+      res.status(500).json({
+        message: "Failed to fetch author's books",
+      });
+    }
   }
-});
+);
 
 // Create a library member
 app.post("/members", async (req: Request, res: Response) => {
@@ -508,7 +518,8 @@ app.post("/loans", async (req: Request, res: Response) => {
   try {
     const activeLoan = await pool.query(
       `SELECT id FROM loans
-       WHERE book_id = $1 AND returned_at IS NULL`,
+       WHERE book_id = $1
+       AND returned_at IS NULL`,
       [book_id]
     );
 
@@ -548,100 +559,111 @@ app.post("/loans", async (req: Request, res: Response) => {
 });
 
 // Return a borrowed book
-app.patch("/loans/:id/return", async (req: Request, res: Response) => {
-  if (!isValidId(req.params.id)) {
-    return res.status(400).json({
-      message: "Invalid loan ID",
-    });
-  }
-
-  try {
-    const result = await pool.query(
-      `UPDATE loans
-       SET returned_at = NOW()
-       WHERE id = $1 AND returned_at IS NULL
-       RETURNING *`,
-      [Number(req.params.id)]
-    );
-
-    if (result.rows.length > 0) {
-      return res.status(200).json({
-        message: "Book returned successfully",
-        loan: result.rows[0],
+app.patch(
+  "/loans/:id/return",
+  async (req: Request, res: Response) => {
+    if (!isValidId(req.params.id)) {
+      return res.status(400).json({
+        message: "Invalid loan ID",
       });
     }
 
-    const existingLoan = await pool.query(
-      "SELECT id FROM loans WHERE id = $1",
-      [Number(req.params.id)]
-    );
+    try {
+      const result = await pool.query(
+        `UPDATE loans
+         SET returned_at = NOW()
+         WHERE id = $1
+         AND returned_at IS NULL
+         RETURNING *`,
+        [Number(req.params.id)]
+      );
 
-    if (existingLoan.rows.length === 0) {
-      return res.status(404).json({
-        message: "Loan not found",
+      if (result.rows.length > 0) {
+        return res.status(200).json({
+          message: "Book returned successfully",
+          loan: result.rows[0],
+        });
+      }
+
+      const existingLoan = await pool.query(
+        "SELECT id FROM loans WHERE id = $1",
+        [Number(req.params.id)]
+      );
+
+      if (existingLoan.rows.length === 0) {
+        return res.status(404).json({
+          message: "Loan not found",
+        });
+      }
+
+      res.status(409).json({
+        message: "Book has already been returned",
+      });
+    } catch (error) {
+      console.error(getErrorMessage(error));
+
+      res.status(500).json({
+        message: "Failed to return book",
       });
     }
-
-    res.status(409).json({
-      message: "Book has already been returned",
-    });
-  } catch (error) {
-    console.error(getErrorMessage(error));
-
-    res.status(500).json({
-      message: "Failed to return book",
-    });
   }
-});
+);
 
 // Get a member's loan history
-app.get("/members/:id/loans", async (req: Request, res: Response) => {
-  if (!isValidId(req.params.id)) {
-    return res.status(400).json({
-      message: "Invalid member ID",
-    });
-  }
-
-  const id = Number(req.params.id);
-
-  try {
-    const member = await pool.query(
-      "SELECT id FROM members WHERE id = $1",
-      [id]
-    );
-
-    if (member.rows.length === 0) {
-      return res.status(404).json({
-        message: "Member not found",
+app.get(
+  "/members/:id/loans",
+  async (req: Request, res: Response) => {
+    if (!isValidId(req.params.id)) {
+      return res.status(400).json({
+        message: "Invalid member ID",
       });
     }
 
-    const result = await pool.query(
-      `SELECT
-         loans.id,
-         loans.book_id,
-         books.title AS book_title,
-         loans.member_id,
-         members.name AS member_name,
-         loans.borrowed_at,
-         loans.returned_at
-       FROM loans
-       JOIN books ON loans.book_id = books.id
-       JOIN members ON loans.member_id = members.id
-       WHERE members.id = $1
-       ORDER BY loans.borrowed_at DESC, loans.id DESC`,
-      [id]
-    );
+    const id = Number(req.params.id);
 
-    res.status(200).json(result.rows);
-  } catch (error) {
-    console.error(getErrorMessage(error));
+    try {
+      const member = await pool.query(
+        "SELECT id FROM members WHERE id = $1",
+        [id]
+      );
 
-    res.status(500).json({
-      message: "Failed to fetch member loans",
-    });
+      if (member.rows.length === 0) {
+        return res.status(404).json({
+          message: "Member not found",
+        });
+      }
+
+      const result = await pool.query(
+        `SELECT
+           loans.id,
+           loans.book_id,
+           books.title AS book_title,
+           loans.member_id,
+           members.name AS member_name,
+           loans.borrowed_at,
+           loans.returned_at
+         FROM loans
+         JOIN books
+           ON loans.book_id = books.id
+         JOIN members
+           ON loans.member_id = members.id
+         WHERE members.id = $1
+         ORDER BY
+           loans.borrowed_at DESC,
+           loans.id DESC`,
+        [id]
+      );
+
+      res.status(200).json(result.rows);
+    } catch (error) {
+      console.error(getErrorMessage(error));
+
+      res.status(500).json({
+        message: "Failed to fetch member loans",
+      });
+    }
   }
-});
+);
 
 app.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
