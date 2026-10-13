@@ -4,6 +4,7 @@ import { pool } from "./db.js";
 import { env } from "./env.js";
 import {
   bookPatchSchema,
+  bookQuerySchema,
   bookSchema,
   idParamSchema,
   type Book,
@@ -44,23 +45,15 @@ app.get("/", (req: Request, res: Response) => {
 
 // Get all books
 app.get("/books", async (req: Request, res: Response) => {
-  const { genre, sort } = req.query;
-  const allowedSorts = ["title", "published_year", "genre"];
+  const parsedQuery = bookQuerySchema.safeParse(req.query);
 
-  if (genre !== undefined && typeof genre !== "string") {
+  if (!parsedQuery.success) {
     return res.status(400).json({
-      message: "Invalid genre",
+      errors: z.flattenError(parsedQuery.error),
     });
   }
 
-  if (
-    sort !== undefined &&
-    (typeof sort !== "string" || !allowedSorts.includes(sort))
-  ) {
-    return res.status(400).json({
-      message: "Invalid sort field",
-    });
-  }
+  const { genre, sort } = parsedQuery.data;
 
   try {
     let query = "SELECT * FROM books";
