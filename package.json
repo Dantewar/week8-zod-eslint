@@ -1,12 +1,14 @@
 {
-  "name": "week8-express-postgres",
+  "name": "week8-zod-eslint",
   "version": "1.0.0",
   "description": "Week 8 backend homework using Express and PostgreSQL",
   "type": "module",
-  "main": "index.js",
+  "main": "dist/index.js",
   "scripts": {
-    "start": "node index.js",
-    "dev": "node --watch index.js"
+    "start": "tsx src/index.ts",
+    "dev": "tsx watch src/index.ts",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit"
   },
   "keywords": [],
   "author": "Dante",
@@ -14,6 +16,19 @@
   "dependencies": {
     "dotenv": "^18.0.7",
     "express": "^5.0.0",
-    "pg": "^8.0.0"
+    "pg": "^8.0.0",
+    "zod": "^4.6.6"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/express": "^5.0.6",
+    "@types/node": "^26.6.5",
+    "@types/pg": "^8.23.1",
+    "eslint": "^10.12.0",
+    "globals": "^17.13.0",
+    "jiti": "^2.7.0",
+    "tsx": "^4.23.15",
+    "typescript": "<6.1.0",
+    "typescript-eslint": "^8.71.1"
   }
 }
