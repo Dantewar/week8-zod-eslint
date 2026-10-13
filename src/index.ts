@@ -2,24 +2,16 @@ import express, { type Request, type Response } from "express";
 import { z } from "zod";
 import { pool } from "./db.js";
 import { env } from "./env.js";
-import { bookSchema, type Book } from "./schemas.js";
+import {
+  bookSchema,
+  idParamSchema,
+  type Book,
+} from "./schemas.js";
 
 const app = express();
 const PORT = env.PORT;
 
 app.use(express.json());
-
-const isValidId = (id: string | string[]): boolean => {
-  if (Array.isArray(id)) {
-    return false;
-  }
-
-  return (
-    /^\d+$/.test(id) &&
-    Number.isSafeInteger(Number(id)) &&
-    Number(id) > 0
-  );
-};
 
 const getErrorMessage = (error: unknown): string => {
   if (error instanceof Error) {
@@ -49,7 +41,7 @@ app.get("/", (req: Request, res: Response) => {
   });
 });
 
-// Get all books with filtering and sorting
+// Get all books
 app.get("/books", async (req: Request, res: Response) => {
   const { genre, sort } = req.query;
   const allowedSorts = ["title", "published_year", "genre"];
@@ -94,16 +86,20 @@ app.get("/books", async (req: Request, res: Response) => {
 
 // Get one book
 app.get("/books/:id", async (req: Request, res: Response) => {
-  if (!isValidId(req.params.id)) {
+  const parsedParams = idParamSchema.safeParse(req.params);
+
+  if (!parsedParams.success) {
     return res.status(400).json({
-      message: "Invalid book ID",
+      errors: z.flattenError(parsedParams.error),
     });
   }
+
+  const { id } = parsedParams.data;
 
   try {
     const result = await pool.query<Book>(
       "SELECT * FROM books WHERE id = $1",
-      [Number(req.params.id)]
+      [id]
     );
 
     if (result.rows.length === 0) {
@@ -175,9 +171,11 @@ app.post("/books", async (req: Request, res: Response) => {
 
 // Update a complete book
 app.put("/books/:id", async (req: Request, res: Response) => {
-  if (!isValidId(req.params.id)) {
+  const parsedParams = idParamSchema.safeParse(req.params);
+
+  if (!parsedParams.success) {
     return res.status(400).json({
-      message: "Invalid book ID",
+      errors: z.flattenError(parsedParams.error),
     });
   }
 
@@ -188,6 +186,8 @@ app.put("/books/:id", async (req: Request, res: Response) => {
       errors: z.flattenError(parsedBook.error),
     });
   }
+
+  const { id } = parsedParams.data;
 
   const {
     title,
@@ -211,7 +211,7 @@ app.put("/books/:id", async (req: Request, res: Response) => {
         genre ?? null,
         published_year ?? null,
         author_id ?? null,
-        Number(req.params.id),
+        id,
       ]
     );
 
@@ -239,12 +239,15 @@ app.put("/books/:id", async (req: Request, res: Response) => {
 
 // Partially update a book
 app.patch("/books/:id", async (req: Request, res: Response) => {
-  if (!isValidId(req.params.id)) {
+  const parsedParams = idParamSchema.safeParse(req.params);
+
+  if (!parsedParams.success) {
     return res.status(400).json({
-      message: "Invalid book ID",
+      errors: z.flattenError(parsedParams.error),
     });
   }
 
+  const { id } = parsedParams.data;
   const body = req.body;
 
   if (
@@ -304,7 +307,7 @@ app.patch("/books/:id", async (req: Request, res: Response) => {
         title === undefined ? null : title.trim(),
         genre ?? null,
         published_year ?? null,
-        Number(req.params.id),
+        id,
       ]
     );
 
@@ -326,16 +329,20 @@ app.patch("/books/:id", async (req: Request, res: Response) => {
 
 // Delete a book
 app.delete("/books/:id", async (req: Request, res: Response) => {
-  if (!isValidId(req.params.id)) {
+  const parsedParams = idParamSchema.safeParse(req.params);
+
+  if (!parsedParams.success) {
     return res.status(400).json({
-      message: "Invalid book ID",
+      errors: z.flattenError(parsedParams.error),
     });
   }
+
+  const { id } = parsedParams.data;
 
   try {
     const result = await pool.query<Book>(
       "DELETE FROM books WHERE id = $1 RETURNING *",
-      [Number(req.params.id)]
+      [id]
     );
 
     if (result.rows.length === 0) {
@@ -410,13 +417,15 @@ app.post("/authors", async (req: Request, res: Response) => {
 app.get(
   "/authors/:id/books",
   async (req: Request, res: Response) => {
-    if (!isValidId(req.params.id)) {
+    const parsedParams = idParamSchema.safeParse(req.params);
+
+    if (!parsedParams.success) {
       return res.status(400).json({
-        message: "Invalid author ID",
+        errors: z.flattenError(parsedParams.error),
       });
     }
 
-    const id = Number(req.params.id);
+    const { id } = parsedParams.data;
 
     try {
       const author = await pool.query(
@@ -562,11 +571,15 @@ app.post("/loans", async (req: Request, res: Response) => {
 app.patch(
   "/loans/:id/return",
   async (req: Request, res: Response) => {
-    if (!isValidId(req.params.id)) {
+    const parsedParams = idParamSchema.safeParse(req.params);
+
+    if (!parsedParams.success) {
       return res.status(400).json({
-        message: "Invalid loan ID",
+        errors: z.flattenError(parsedParams.error),
       });
     }
+
+    const { id } = parsedParams.data;
 
     try {
       const result = await pool.query(
@@ -575,7 +588,7 @@ app.patch(
          WHERE id = $1
          AND returned_at IS NULL
          RETURNING *`,
-        [Number(req.params.id)]
+        [id]
       );
 
       if (result.rows.length > 0) {
@@ -587,7 +600,7 @@ app.patch(
 
       const existingLoan = await pool.query(
         "SELECT id FROM loans WHERE id = $1",
-        [Number(req.params.id)]
+        [id]
       );
 
       if (existingLoan.rows.length === 0) {
@@ -609,17 +622,19 @@ app.patch(
   }
 );
 
-// Get a member's loan history
+// Get member loan history
 app.get(
   "/members/:id/loans",
   async (req: Request, res: Response) => {
-    if (!isValidId(req.params.id)) {
+    const parsedParams = idParamSchema.safeParse(req.params);
+
+    if (!parsedParams.success) {
       return res.status(400).json({
-        message: "Invalid member ID",
+        errors: z.flattenError(parsedParams.error),
       });
     }
 
-    const id = Number(req.params.id);
+    const { id } = parsedParams.data;
 
     try {
       const member = await pool.query(

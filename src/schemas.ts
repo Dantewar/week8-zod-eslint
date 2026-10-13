@@ -22,6 +22,10 @@ export const bookSchema = z.object({
     .optional(),
 });
 
+export const idParamSchema = z.object({
+  id: z.coerce.number().int().positive(),
+});
+
 export type Book = z.infer<typeof bookSchema> & {
   id: number;
 };
