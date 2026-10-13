@@ -3,6 +3,7 @@ import { z } from "zod";
 import { pool } from "./db.js";
 import { env } from "./env.js";
 import {
+  bookPatchSchema,
   bookSchema,
   idParamSchema,
   type Book,
@@ -247,52 +248,22 @@ app.patch("/books/:id", async (req: Request, res: Response) => {
     });
   }
 
+  const parsedBook = bookPatchSchema.safeParse(req.body);
+
+  if (!parsedBook.success) {
+    return res.status(400).json({
+      errors: z.flattenError(parsedBook.error),
+    });
+  }
+
   const { id } = parsedParams.data;
-  const body = req.body;
 
-  if (
-    !body ||
-    typeof body !== "object" ||
-    Array.isArray(body) ||
-    Object.keys(body).length === 0
-  ) {
-    return res.status(400).json({
-      message: "Request body cannot be empty",
-    });
-  }
-
-  const allowedFields = [
-    "title",
-    "genre",
-    "published_year",
-  ];
-
-  if (
-    Object.keys(body).some(
-      (field) => !allowedFields.includes(field)
-    )
-  ) {
-    return res.status(400).json({
-      message: "Invalid book field",
-    });
-  }
-
-  const { title, genre, published_year } = body;
-
-  if (
-    (title !== undefined &&
-      (typeof title !== "string" || !title.trim())) ||
-    (genre !== undefined &&
-      genre !== null &&
-      typeof genre !== "string") ||
-    (published_year !== undefined &&
-      published_year !== null &&
-      !Number.isInteger(published_year))
-  ) {
-    return res.status(400).json({
-      message: "Invalid book data",
-    });
-  }
+  const {
+    title,
+    genre,
+    published_year,
+    author_id,
+  } = parsedBook.data;
 
   try {
     const result = await pool.query<Book>(
@@ -300,13 +271,15 @@ app.patch("/books/:id", async (req: Request, res: Response) => {
        SET
          title = COALESCE($1, title),
          genre = COALESCE($2, genre),
-         published_year = COALESCE($3, published_year)
-       WHERE id = $4
+         published_year = COALESCE($3, published_year),
+         author_id = COALESCE($4, author_id)
+       WHERE id = $5
        RETURNING *`,
       [
-        title === undefined ? null : title.trim(),
+        title ?? null,
         genre ?? null,
         published_year ?? null,
+        author_id ?? null,
         id,
       ]
     );
@@ -319,6 +292,12 @@ app.patch("/books/:id", async (req: Request, res: Response) => {
 
     res.status(200).json(result.rows[0]);
   } catch (error) {
+    if (getErrorCode(error) === "23503") {
+      return res.status(400).json({
+        message: "Author does not exist",
+      });
+    }
+
     console.error(getErrorMessage(error));
 
     res.status(500).json({
